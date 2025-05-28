@@ -200,7 +200,7 @@ class AliquotUpdaterApp:
             initialfile="Process Patient Sample.csv",
         )
         if file_path:
-            with open(file_path, mode="w", newline="") as file:
+            with open(file_path, "w", newline="") as file:
                 writer = csv.writer(file)
                 # Write header and example row for Process Patient Sample CSV
                 writer.writerow(
@@ -230,6 +230,8 @@ class AliquotUpdaterApp:
                     ]
                 )
 
+            # set the downloaded file into the file_path entry
+            self.file_path.set(file_path)
             self.open_file(file_path)
 
     def download_passage_csv(self):
@@ -240,7 +242,7 @@ class AliquotUpdaterApp:
             initialfile="Freeze Passaged Cells.csv",
         )
         if file_path:
-            with open(file_path, mode="w", newline="") as file:
+            with open(file_path, "w", newline="") as file:
                 writer = csv.writer(file)
                 # Write header and example row for Process Patient Sample CSV
                 writer.writerow(
@@ -276,6 +278,8 @@ class AliquotUpdaterApp:
                     ]
                 )
 
+            # set the downloaded file into the file_path entry
+            self.file_path.set(file_path)
             self.open_file(file_path)
 
     def download_aliquot_csv(self):
@@ -286,7 +290,7 @@ class AliquotUpdaterApp:
             initialfile="Aliquot Freezer Assignment.csv",
         )
         if file_path:
-            with open(file_path, mode="w", newline="") as file:
+            with open(file_path, "w", newline="") as file:
                 writer = csv.writer(file)
                 # Write header and example row for Aliquot Freezer Assignment CSV
                 writer.writerow(
@@ -294,6 +298,8 @@ class AliquotUpdaterApp:
                 )
                 writer.writerow(["187093", "", "1", "", "2", "3"])
 
+            # set the downloaded file into the file_path entry
+            self.file_path.set(file_path)
             self.open_file(file_path)
 
     def open_file(self, file_path):
