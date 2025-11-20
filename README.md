@@ -1,6 +1,6 @@
 # Freezerworks Processor
 
-[![GitHub](https://img.shields.io/badge/GitHub-FreezerworksProcessor-blue?style=flat&logo=github)](https://github.com/yourusername/Freezerworks-Processor)
+[![GitHub](https://img.shields.io/badge/GitHub-FreezerworksProcessor-blue?style=flat&logo=github)](https://github.com/thussenthan/Freezerworks-Processor)
 
 **Version 1.5** (Updated as of 02/04/2025)
 
