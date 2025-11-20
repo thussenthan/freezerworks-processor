@@ -15,7 +15,7 @@ The program uses Bearer Token authentication to securely connect with the Freeze
 
 ---
 
-**Note:** This project was originally developed for lab-specific operations at the Sholler Lab, Penn State College of Medicine. You may need to customize the code to fit your particular requirements.
+> **Note:** This project was originally developed for lab-specific operations at the Sholler Lab, Penn State College of Medicine, and may require code customization to fit your specific requirements.
 
 ---
 
