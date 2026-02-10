@@ -40,9 +40,9 @@ The program uses Bearer Token authentication to securely connect with the Freeze
   ```bash
   pip install requests PyPDF2
   ```
-- **Tkinter:** Usually bundled with Python.
+- **Tkinter:** Usually bundled with Python on Windows and macOS (for Homebrew Python, install `python-tk` if needed).
 - **SSL Certificate:**  
-  Place the file `freezerworks.pennstatehealth.net.crt` or something similar in the same directory as the script/executable.
+  Place `freezerworks.pennstatehealth.net.crt` (or `.cer`) in the same directory as the script/executable.
 - **Access to the Freezerworks API:**  
   Ensure you have valid API credentials and network access.
 
@@ -53,18 +53,21 @@ The program uses Bearer Token authentication to securely connect with the Freeze
    git clone https://github.com/thussenthan/Freezerworks-Processor.git
    ```
 2. **Verify the SSL Certificate:**  
-   Ensure that `freezerworks.pennstatehealth.net.crt` (or any SSL certificate, if applicable) is in the repository directory.
+   Ensure that `freezerworks.pennstatehealth.net.crt` (or `.cer`) is in the repository directory.
 3. **Run the Application:**
-   - **Executable:**
-     To make an executable file, run the following command:
+   - **Executable (Windows):**
      ```bash
      pyinstaller --clean --onefile --windowed --add-data "freezerworks.pennstatehealth.net.crt;." "freezerworks_processor.py"
      ```
      Then double-click `Freezerworks Processor.exe` to launch.
-   - **Python Script:**  
-     Run the following command:
+   - **Executable (macOS):**
      ```bash
-     python FreezerworksProcessor.py
+     pyinstaller --clean --onefile --windowed --add-data "freezerworks.pennstatehealth.net.cer:." "freezerworks_processor.py"
+     ```
+     Then launch `dist/freezerworks_processor` from Finder or Terminal.
+   - **Python Script (Windows/macOS):**  
+     ```bash
+     python freezerworks_processor.py
      ```
 
 ## Usage
@@ -99,6 +102,13 @@ The program uses Bearer Token authentication to securely connect with the Freeze
    - The application will process your data, update aliquot records via the Freezerworks API, and generate PDF labels where applicable.
    - Monitor the log window for progress messages and any errors.
    - If PDF labels are generated, you will be prompted to save the merged PDF file.
+   - If the app appears to do nothing after clicking **Update**, check `freezerworks_processor.log` next to the executable for details (macOS app bundles may write logs to `~/Library/Logs/Freezerworks Processor/`).
+
+## No Python?
+
+If the user does not have Python or the required packages installed, use the packaged executable:
+- **Windows:** Distribute `Freezerworks Processor.exe` from `dist/` (no Python required).
+- **macOS:** Distribute `dist/freezerworks_processor` (no Python required).
 
 ## CSV Template Details
 

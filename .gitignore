@@ -1,13 +1,5 @@
-# tkinter & pyinstaller build + distribution files
+.DS_Store
 build/
 dist/
-freezerworks_processor.spec
-
-# python environment
-venv/
-
-# personal certificate files (secrets)
-freezerworks.pennstatehealth.net.crt
-
-# random code archive
-Others/
+*.spec
+freezerworks.pennstatehealth.net.cer

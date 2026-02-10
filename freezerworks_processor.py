@@ -11,6 +11,7 @@ from PyPDF2 import PdfMerger
 from io import BytesIO
 import platform
 import time
+import traceback
 
 
 class AliquotUpdaterApp:
@@ -165,26 +166,46 @@ class AliquotUpdaterApp:
         self.not_updated_aliquots = []
         self.base_url = "https://freezerworks.pennstatehealth.net/api/v1"
         self.cert_path = self.get_cert_path()
+        self.log_file_path = os.path.join(self._writable_dir(), "freezerworks_processor.log")
         self.updating = False
         self._ellipse_index = 0
+
+    def _resource_dir(self):
+        if getattr(sys, "frozen", False):
+            return sys._MEIPASS
+        return os.path.dirname(__file__)
+
+    def _writable_dir(self):
+        if getattr(sys, "frozen", False):
+            if platform.system() == "Darwin":
+                base = os.path.expanduser("~/Library/Logs/Freezerworks Processor")
+                os.makedirs(base, exist_ok=True)
+                return base
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(__file__)
+
+    def _on_ui(self, func, *args, **kwargs):
+        if threading.current_thread() is threading.main_thread():
+            return func(*args, **kwargs)
+        self.root.after(0, lambda: func(*args, **kwargs))
+
+    def show_error(self, title, message):
+        self._on_ui(messagebox.showerror, title, message)
 
     def clear_not_updated_aliquots(self):
         self.not_updated_aliquots.clear()
 
     def get_cert_path(self):
-        if getattr(sys, "frozen", False):
-            application_path = sys._MEIPASS
-        else:
-            application_path = os.path.dirname(__file__)
-        cert_path = os.path.join(
-            application_path, "freezerworks.pennstatehealth.net.crt"
-        )
+        resource_dir = self._resource_dir()
+        cert_path = os.path.join(resource_dir, "freezerworks.pennstatehealth.net.crt")
+        alt_cert_path = os.path.join(resource_dir, "freezerworks.pennstatehealth.net.cer")
 
-        if not os.path.exists(cert_path):
-            messagebox.showerror(
-                "Error", "SSL Certificate not found. Please check the path."
-            )
+        if os.path.exists(cert_path):
+            return cert_path
+        if os.path.exists(alt_cert_path):
+            return alt_cert_path
 
+        self.show_error("Error", "SSL Certificate not found. Please check the path.")
         return cert_path
 
     def browse_file(self):
@@ -335,18 +356,27 @@ class AliquotUpdaterApp:
     def _wrapped_update_aliquots(self):
         try:
             self.update_aliquots()
+        except Exception as e:
+            self.log("Unexpected error while updating aliquots. Check the log file.", bold=True)
+            self.log_exception("update_aliquots", e)
         finally:
             self.root.after(0, self.finish_update)
 
     def _wrapped_process_patient_sample(self):
         try:
             self.process_patient_sample()
+        except Exception as e:
+            self.log("Unexpected error while processing samples. Check the log file.", bold=True)
+            self.log_exception("process_patient_sample", e)
         finally:
             self.root.after(0, self.finish_update)
 
     def _wrapped_passage_culture_cells(self):
         try:
             self.passage_culture_cells()
+        except Exception as e:
+            self.log("Unexpected error while freezing passaged cells. Check the log file.", bold=True)
+            self.log_exception("passage_culture_cells", e)
         finally:
             self.root.after(0, self.finish_update)
 
@@ -367,12 +397,12 @@ class AliquotUpdaterApp:
     def validate_inputs(self):
         token = self.token_entry.get()
         if not token:
-            messagebox.showerror("Error", "Please enter the Bearer Token.")
+            self.show_error("Error", "Please enter the Bearer Token.")
             return None, None
 
         csv_file_path = self.file_path.get()
         if not csv_file_path:
-            messagebox.showerror("Error", "Please select a CSV file.")
+            self.show_error("Error", "Please select a CSV file.")
             return None, None
 
         headers = {
@@ -386,13 +416,20 @@ class AliquotUpdaterApp:
                 test_url, headers=headers, verify=self.cert_path
             )
             if test_response.status_code != 200:
-                messagebox.showerror(
+                self.log(
+                    f"Token validation failed: {test_response.status_code} - {test_response.reason}",
+                    bold=True,
+                )
+                self.show_error(
                     "Error",
                     "Invalid Bearer Token. Please check (or re-generate) your token and try again.",
                 )
                 return
         except requests.exceptions.SSLError as e:
-            messagebox.showerror("SSL Error", f"SSL verification failed: {str(e)}")
+            self.show_error("SSL Error", f"SSL verification failed: {str(e)}")
+            return
+        except requests.exceptions.RequestException as e:
+            self.show_error("Network Error", f"Connection failed: {str(e)}")
             return
 
         return headers, csv_file_path
@@ -1376,7 +1413,16 @@ class AliquotUpdaterApp:
 
         try:
             output_str = requests.get(url, headers=headers, verify=self.cert_path)
-            output = output_str.json()
+            output_str.raise_for_status()
+            try:
+                output = output_str.json()
+            except ValueError:
+                self.log(
+                    f"Error: Failed to parse response for aliquot {aliquot_id}: {output_str.status_code}",
+                    bold=True,
+                )
+                self.not_updated_aliquots.append(aliquot_id)
+                return
 
             position1_value = output["properties"].get("position1")
 
@@ -1435,8 +1481,22 @@ class AliquotUpdaterApp:
 
     def log(self, message, bold=False):
         tag = "bold" if bold else None
+        self._on_ui(self._append_log, message, tag)
+
+    def _append_log(self, message, tag):
         self.log_text.insert(tk.END, message + "\n", tag)
         self.log_text.see(tk.END)
+
+    def log_exception(self, context, exc):
+        try:
+            with open(self.log_file_path, "a") as log_file:
+                log_file.write(
+                    f"\n[{datetime.now().isoformat()}] {context}: {repr(exc)}\n"
+                )
+                log_file.write(traceback.format_exc())
+        except Exception:
+            # Avoid crashing on logging failures.
+            pass
 
     def open_url(self, url):
         webbrowser.open_new(url)
