@@ -57,12 +57,12 @@ The program uses Bearer Token authentication to securely connect with the Freeze
 3. **Run the Application:**
    - **Executable (Windows):**
      ```bash
-     pyinstaller --clean --onefile --windowed --add-data "freezerworks.pennstatehealth.net.crt;." "freezerworks_processor.py"
+     python build.py --target windows
      ```
      Then double-click `Freezerworks Processor.exe` to launch.
    - **Executable (macOS):**
      ```bash
-     pyinstaller --clean --onefile --windowed --add-data "freezerworks.pennstatehealth.net.cer:." "freezerworks_processor.py"
+     python build.py --target macos
      ```
      Then launch `dist/freezerworks_processor` from Finder or Terminal.
    - **Python Script (Windows/macOS):**  
@@ -109,6 +109,14 @@ The program uses Bearer Token authentication to securely connect with the Freeze
 If the user does not have Python or the required packages installed, use the packaged executable:
 - **Windows:** Distribute `Freezerworks Processor.exe` from `dist/` (no Python required).
 - **macOS:** Distribute `dist/freezerworks_processor` (no Python required).
+
+## Windows "failed to remove temporary directory"
+
+If you see `failed to remove temporary directory` when closing the `.exe`, rebuild with `--runtime-tmpdir` so PyInstaller unpacks to a dedicated folder under `LocalAppData` instead of the default Windows temp location:
+
+```bash
+python build.py --target windows
+```
 
 ## CSV Template Details
 
