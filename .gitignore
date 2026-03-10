@@ -3,3 +3,7 @@ build/
 dist/
 *.spec
 freezerworks.pennstatehealth.net.cer
+freezerworks.pennstatehealth.net.pem
+freezerworks_processor.log
+settings.json
+__pycache__/

@@ -2,16 +2,16 @@
 
 [![GitHub](https://img.shields.io/badge/GitHub-FreezerworksProcessor-blue?style=flat&logo=github)](https://github.com/thussenthan/Freezerworks-Processor)
 
-**Version 1.5** (Updated as of 02/04/2025)
+**Version 1.7** (Updated as of 03/10/2026)
 
 ## Overview
 
-Freezerworks Processor is a Python-based GUI application designed to automate various processes within the Freezerworks system. The application provides three primary functionalities:
-- **Process Patient Sample** – Processes sample data and prints PDF labels.
-- **Freeze Passaged Cells** – Manages aliquot creation for passaged cells with associated PDF label generation.
-- **Aliquot Freezer Assignment** – Updates aliquot freezer location assignments using CSV input.
+Freezerworks Processor is a Python GUI that automates common Freezerworks workflows. It supports three functions:
+- **Process Patient Sample**: Create aliquots from patient sample metadata and print PDF labels.
+- **Freeze Passaged Cells**: Create aliquots for passaged cell samples and print PDF labels.
+- **Aliquot Freezer Assignment**: Update aliquot freezer locations from a CSV.
 
-The program uses Bearer Token authentication to securely connect with the Freezerworks REST API, and it includes features such as CSV template generation, SSL certificate verification, and real-time logging.
+Authentication is via **Bearer Token** against the Freezerworks REST API. The app also supports CSV template generation, SSL certificate verification, and real-time logging.
 
 ---
 
@@ -28,52 +28,87 @@ The program uses Bearer Token authentication to securely connect with the Freeze
   - *Freeze Passaged Cells* – Process cell culture samples and generate multiple PDF labels.
   - *Aliquot Freezer Assignment* – Update the location of aliquots in Freezerworks based on CSV input.
 - **CSV Template Generation:** Download preformatted CSV templates for each functionality.
-- **SSL Certificate Support:** Ensures secure API connections using a provided certificate.
+- **SSL Certificate Support:** Uses a provided `.crt` or `.cer` file for TLS verification.
 - **Logging:** Displays real-time messages, errors, and progress updates within the GUI.
 - **PDF Merging:** Uses PyPDF2 to combine generated PDF labels.
+
+## Quick Start (New Users)
+
+1. **Get a Bearer Token:** In the app, click **"Bearer Token*:"** and log in to Freezerworks.
+2. **Pick a workflow:** Choose one of the three radio options.
+3. **Download a CSV template:** Click **"Download CSV"** for your workflow.
+4. **Delete the example row:** Replace it with your real data.
+5. **Select your CSV file:** Click the CSV field and choose your file.
+6. **Click Update:** Watch the log window for progress and errors.
+
+## First Run Checklist
+
+- You can open the Freezerworks API docs page from the token link in the app.
+- The certificate file `freezerworks.pennstatehealth.net.cer` (or `.crt`) is in the same folder as the script/executable.
+- You can open the downloaded CSV template and save it after replacing the example row.
+- You have valid Freezerworks credentials with access to the needed tables.
 
 ## Prerequisites
 
 - **Python 3.x**  
-- **Required Python Packages:**  
-  Install using pip:
+- **Required Python Packages:**
   ```bash
-  pip install requests PyPDF2
+  python3 -m pip install requests PyPDF2
   ```
-- **Tkinter:** Usually bundled with Python on Windows and macOS (for Homebrew Python, install `python-tk` if needed).
-- **SSL Certificate:**  
-  Place `freezerworks.pennstatehealth.net.crt` (or `.cer`) in the same directory as the script/executable.
-- **Access to the Freezerworks API:**  
-  Ensure you have valid API credentials and network access.
+- **Tkinter:** Usually bundled with Python on Windows and macOS. If your Python lacks Tk, install the Tk package for your Python distro.
+- **SSL Certificate:** The repo includes `freezerworks.pennstatehealth.net.cer`. The app looks for `.crt` or `.cer` in the same directory as the script/executable.
+- **Freezerworks API Access:** You need valid credentials and network access.
 
 ## Setup
 
-1. **Clone or Download the Repository:**
-   ```bash
-   git clone https://github.com/thussenthan/Freezerworks-Processor.git
-   ```
-2. **Verify the SSL Certificate:**  
-   Ensure that `freezerworks.pennstatehealth.net.crt` (or `.cer`) is in the repository directory.
-3. **Run the Application:**
-   - **Executable (Windows):**
-     ```bash
-     python build.py --target windows
-     ```
-     Then double-click `Freezerworks Processor.exe` to launch.
-   - **Executable (macOS):**
-     ```bash
-     python build.py --target macos
-     ```
-     Then launch `dist/freezerworks_processor` from Finder or Terminal.
-   - **Python Script (Windows/macOS):**  
-     ```bash
-     python freezerworks_processor.py
-     ```
+### 1) Clone the Repository
+
+```bash
+git clone https://github.com/thussenthan/Freezerworks-Processor.git
+cd Freezerworks-Processor
+```
+
+### 2) Install Dependencies
+
+```bash
+python3 -m pip install --upgrade pip
+python3 -m pip install requests PyPDF2
+```
+
+### 3) Verify the Certificate
+
+Make sure `freezerworks.pennstatehealth.net.cer` (or `.crt`) is next to the script or executable.
+
+### 4) Run the App (macOS or Windows)
+
+```bash
+python3 freezerworks_processor.py
+```
+
+## Build Executables
+
+### macOS
+
+```bash
+python3 -m pip install pyinstaller
+python3 build.py --target macos
+```
+
+Launch `dist/freezerworks_processor`.
+
+### Windows
+
+```bash
+python -m pip install pyinstaller
+python build.py --target windows
+```
+
+Launch `Freezerworks Processor.exe` from `dist/`.
 
 ## Usage
 
 1. **Obtain Your Bearer Token:**
-   - Click the blue **"Enter your Bearer Token"** hyperlink in the application.
+   - Click the blue **"Bearer Token*:"** label in the application.
    - A web browser will open to the Freezerworks API documentation/login page.
    - Enter your Freezerworks credentials and click **"Get Token"**.
    - Use the clipboard button (cyan/light blue) to copy the full token.
@@ -96,13 +131,16 @@ The program uses Bearer Token authentication to securely connect with the Freeze
 
 5. **Select Your CSV File:**
    - Click on the file path field (or the white box labeled **"Select CSV File:"**) to browse and choose your saved CSV.
+   - If you selected a workflow and no CSV was set, the app will open the file picker automatically.
 
 6. **Execute the Update/Processing:**
    - Click the **"Update"** button.
    - The application will process your data, update aliquot records via the Freezerworks API, and generate PDF labels where applicable.
    - Monitor the log window for progress messages and any errors.
    - If PDF labels are generated, you will be prompted to save the merged PDF file.
-   - If the app appears to do nothing after clicking **Update**, check `freezerworks_processor.log` next to the executable for details (macOS app bundles may write logs to `~/Library/Logs/Freezerworks Processor/`).
+   - If the app appears to do nothing after clicking **Update**, check the log file:
+     - **Script run:** `freezerworks_processor.log` in the repo directory.
+     - **macOS app bundle:** `~/Library/Logs/Freezerworks Processor/freezerworks_processor.log`.
 
 ## No Python?
 
@@ -201,9 +239,16 @@ python build.py --target windows
 7. **Review Output:**  
    Once the process completes, check the log for confirmation messages such as “All aliquots were updated successfully” or lists of any errors encountered.
 
+## Troubleshooting
+
+- **Tkinter not found / GUI won’t launch:** Install the Tk package for your Python distribution.
+- **SSL errors (`SSLError`):** Confirm the `.cer`/`.crt` file is next to the script or executable.
+- **App opens but nothing happens on Update:** Check the log file path listed above.
+- **macOS app blocked by Gatekeeper:** Right-click the app and choose **Open** once.
+
 ## Support & Contributions
 
-If you have any questions, encounter issues, or would like to contribute improvements or bug fixes, please open an issue or submit a pull request on [GitHub](https://github.com/yourusername/Freezerworks-Processor).
+If you have questions, encounter issues, or would like to contribute improvements, please open an issue or submit a pull request on GitHub.
 
 ## Disclaimer
 

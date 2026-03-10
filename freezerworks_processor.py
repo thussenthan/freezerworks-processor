@@ -6,6 +6,9 @@ import threading
 import webbrowser
 import sys
 import os
+import subprocess
+import ssl
+import json
 from datetime import datetime
 from PyPDF2 import PdfMerger
 from io import BytesIO
@@ -14,38 +17,115 @@ import time
 import traceback
 
 
+class Tooltip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show)
+        self.widget.bind("<Leave>", self.hide)
+
+    def show(self, _event=None):
+        if self.tip_window or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 20
+        self.tip_window = tk.Toplevel(self.widget)
+        self.tip_window.wm_overrideredirect(True)
+        self.tip_window.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            self.tip_window,
+            text=self.text,
+            justify=tk.LEFT,
+            background="#ffffe0",
+            foreground="#000000",
+            relief=tk.SOLID,
+            borderwidth=1,
+            font=("Avenir", 10),
+        )
+        label.pack(ipadx=6, ipady=4)
+
+    def hide(self, _event=None):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+
 class AliquotUpdaterApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Freezerworks Processor")
-        self.root.geometry("600x600")
-        self.root.configure(bg="#f0f0f0")
+        self.root.geometry("520x620")
+        self.root.configure(bg="#f7f7f5")
 
         style = ttk.Style()
-        style.configure("TLabel", font=("Helvetica", 12), padding=5)
-        style.configure("TButton", font=("Helvetica", 12), padding=5)
-        style.configure("TEntry", font=("Helvetica", 12), padding=5)
-        style.configure("Small.TButton", font=("Helvetica", 10), padding=3)
+        # Force a light theme so widgets remain readable in macOS dark mode.
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        bg = "#f6f7fb"
+        panel = "#f6f7fb"
+        text = "#0f172a"
+        muted = "#64748b"
+        accent = "#2563eb"
+        border = "#e2e8f0"
+        self._text_color = text
+        self._muted_color = muted
+        self._token_font_normal = ("Avenir", 12)
+        self._token_font_placeholder = ("Avenir", 10)
 
-        self.main_frame = ttk.Frame(root, padding="10")
+        style.configure("TFrame", background=bg)
+        style.configure("Card.TFrame", background=bg)
+        style.configure("TLabel", font=("Avenir", 12), padding=3, background=bg, foreground=text)
+        style.configure("Header.TLabel", font=("Avenir", 11, "bold"), padding=3, background=bg, foreground=muted)
+        style.configure("TRadiobutton", font=("Avenir", 12, "bold"), background=bg, foreground=text)
+        style.configure("TCheckbutton", font=("Avenir", 11), background=bg, foreground=text)
+        style.configure("Small.TCheckbutton", font=("Avenir", 10), background=bg, foreground=text)
+        style.configure("TEntry", font=("Avenir", 12), padding=3, fieldbackground=bg)
+        style.configure("Error.TEntry", font=("Avenir", 12), padding=3, fieldbackground="#fee2e2")
+        style.configure("TButton", font=("Avenir", 12), padding=5)
+        style.configure("Small.TButton", font=("Avenir", 10), padding=2)
+        style.configure("Ghost.TButton", font=("Avenir", 10), padding=2, foreground=muted)
+        style.map(
+            "TButton",
+            background=[("active", "#e8f0fe"), ("!disabled", panel)],
+            foreground=[("!disabled", text)],
+            bordercolor=[("!disabled", border)],
+        )
+        style.map(
+            "Ghost.TButton",
+            background=[("active", "#e8f0fe"), ("!disabled", panel)],
+            foreground=[("!disabled", muted)],
+            bordercolor=[("!disabled", border)],
+        )
+        style.configure("Accent.TButton", font=("Avenir", 12, "bold"))
+        style.map(
+            "Accent.TButton",
+            background=[("active", "#e2e8f0"), ("!disabled", panel)],
+            foreground=[("!disabled", text)],
+        )
+        style.configure("TSeparator", background=border)
+        style.configure("Status.TLabel", font=("Avenir", 10, "bold"), padding=6, background="#f1f5f9", foreground=text)
+        style.configure("Status.Success.TLabel", font=("Avenir", 10, "bold"), padding=6, background="#dcfce7", foreground="#166534")
+        style.configure("Status.Error.TLabel", font=("Avenir", 10, "bold"), padding=6, background="#fee2e2", foreground="#991b1b")
+
+        self.main_frame = ttk.Frame(root, padding="12", style="TFrame")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
-        self.main_frame.grid_rowconfigure(0, weight=1)
-        self.main_frame.grid_rowconfigure(1, weight=1)
-        self.main_frame.grid_rowconfigure(2, weight=1)
-        self.main_frame.grid_rowconfigure(3, weight=1)
-        self.main_frame.grid_rowconfigure(4, weight=1)
-        self.main_frame.grid_rowconfigure(5, weight=1)
-        self.main_frame.grid_rowconfigure(6, weight=1)
-        self.main_frame.grid_columnconfigure(0, weight=1)
+        for i in range(0, 10):
+            self.main_frame.grid_rowconfigure(i, weight=0)
+        self.main_frame.grid_rowconfigure(7, weight=1)
+        self.main_frame.grid_columnconfigure(0, weight=0, minsize=190)
         self.main_frame.grid_columnconfigure(1, weight=1)
-        self.main_frame.grid_columnconfigure(2, weight=1)
+        self.main_frame.grid_columnconfigure(2, weight=0)
 
         self.token_label = tk.Label(
             self.main_frame,
-            text="Enter your Bearer Token:",
-            fg="blue",
+            text="Bearer Token*:",
+            fg=accent,
             cursor="hand2",
-            font=("Helvetica", 12, "underline"),
+            font=("Avenir", 12, "underline", "bold"),
+            bg=bg,
         )
         self.token_label.grid(row=0, column=0, sticky=tk.W, pady=5)
         self.token_label.bind(
@@ -59,6 +139,26 @@ class AliquotUpdaterApp:
             self.main_frame, show="*", width=50, cursor="hand2"
         )
         self.token_entry.grid(row=0, column=1, pady=5, sticky=tk.EW)
+        self.token_entry.bind("<KeyRelease>", lambda _e: self.update_action_state())
+        self.token_entry.bind("<FocusIn>", self._on_token_focus_in)
+        self.token_entry.bind("<FocusOut>", self._on_token_focus_out)
+        Tooltip(
+            self.token_label,
+            "Click the label to open the Freezerworks API login and get a token.",
+        )
+        self._token_placeholder_text = "Paste bearer token here"
+        self._token_placeholder_active = False
+        self.show_token_var = tk.BooleanVar(value=False)
+        self.token_action_frame = ttk.Frame(self.main_frame)
+        self.token_action_frame.grid(row=0, column=2, sticky=tk.E, padx=(6, 0))
+        self.show_token_checkbox = ttk.Checkbutton(
+            self.token_action_frame,
+            text="Show",
+            variable=self.show_token_var,
+            command=self.toggle_token_visibility,
+        )
+        self.show_token_checkbox.pack(side=tk.LEFT)
+        Tooltip(self.show_token_checkbox, "Show or hide the token text.")
 
         # Checkbox for selecting functionality
         self.functionality_var = tk.StringVar()
@@ -68,35 +168,47 @@ class AliquotUpdaterApp:
             text="Process Patient Sample",
             variable=self.functionality_var,
             value="process_sample",
+            command=self.on_workflow_change,
         )
-        self.process_sample_checkbox.grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.process_sample_checkbox.grid(row=1, column=0, sticky=tk.W, pady=3)
+        Tooltip(
+            self.process_sample_checkbox,
+            "Creates aliquots from a patient sample CSV and prints labels.\n"
+            "Required: Sample metadata, dates, and aliquot type.",
+        )
 
         self.download_sample_button = ttk.Button(
             self.main_frame,
             text="Download CSV",
             command=self.download_sample_csv,
-            style="Small.TButton",
+            style="Ghost.TButton",
         )
-        self.download_sample_button.grid(row=1, column=1, sticky=tk.W, pady=5)
+        self.download_sample_button.grid(row=1, column=1, sticky=tk.W, pady=3, padx=(12, 0))
 
         self.freeze_passaged_cells_checkbox = ttk.Radiobutton(
             self.main_frame,
             text="Freeze Passaged Cells",
             variable=self.functionality_var,
             value="freeze_passaged_cells",
+            command=self.on_workflow_change,
         )
 
-        self.freeze_passaged_cells_checkbox.grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.freeze_passaged_cells_checkbox.grid(row=2, column=0, sticky=tk.W, pady=3)
+        Tooltip(
+            self.freeze_passaged_cells_checkbox,
+            "Creates aliquots for passaged cell cultures and prints labels.\n"
+            "Required: cell line, dates, passage number, and aliquot type.",
+        )
 
         self.download_freeze_passaged_cells_button = ttk.Button(
             self.main_frame,
             text="Download CSV",
             command=self.download_passage_csv,
-            style="Small.TButton",
+            style="Ghost.TButton",
         )
 
         self.download_freeze_passaged_cells_button.grid(
-            row=2, column=1, sticky=tk.W, pady=5
+            row=2, column=1, sticky=tk.W, pady=3, padx=(12, 0)
         )
 
         self.aliquot_assignment_checkbox = ttk.Radiobutton(
@@ -104,19 +216,25 @@ class AliquotUpdaterApp:
             text="Aliquot Freezer Assignment",
             variable=self.functionality_var,
             value="aliquot_assignment",
+            command=self.on_workflow_change,
         )
-        self.aliquot_assignment_checkbox.grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.aliquot_assignment_checkbox.grid(row=3, column=0, sticky=tk.W, pady=3)
+        Tooltip(
+            self.aliquot_assignment_checkbox,
+            "Updates aliquot freezer locations from a CSV.\n"
+            "Required: aliquot ID and location fields.",
+        )
 
         self.download_aliquot_button = ttk.Button(
             self.main_frame,
             text="Download CSV",
             command=self.download_aliquot_csv,
-            style="Small.TButton",
+            style="Ghost.TButton",
         )
-        self.download_aliquot_button.grid(row=3, column=1, sticky=tk.W, pady=5)
+        self.download_aliquot_button.grid(row=3, column=1, sticky=tk.W, pady=3, padx=(12, 0))
 
-        self.file_label = ttk.Label(self.main_frame, text="Select CSV File:")
-        self.file_label.grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.file_label = ttk.Label(self.main_frame, text="Select CSV File:", font=("Avenir", 12, "bold"))
+        self.file_label.grid(row=4, column=0, sticky=tk.W, pady=4)
 
         self.file_path = tk.StringVar()
         self.file_path_entry = ttk.Entry(
@@ -125,39 +243,102 @@ class AliquotUpdaterApp:
             cursor="hand2",
         )
         self.file_path_entry.bind("<Button-1>", lambda e: self.browse_file())
-        self.file_path_entry.grid(row=4, column=1, columnspan=2, sticky=tk.EW, pady=5)
+        self.file_path_entry.grid(row=4, column=1, sticky=tk.EW, pady=4)
+        Tooltip(self.file_label, "Choose the CSV template for the selected workflow.")
+        self.browse_button = ttk.Button(
+            self.main_frame, text="Browse...", command=self.browse_file
+        )
+        self.browse_button.grid(row=4, column=2, sticky=tk.E, padx=(6, 0), pady=4)
+
+        self.dry_run_var = tk.BooleanVar(value=False)
+        self.dry_run_checkbox = ttk.Checkbutton(
+            self.main_frame,
+            text="Dry Run (no API changes)",
+            variable=self.dry_run_var,
+            command=self.save_settings,
+            style="Small.TCheckbutton",
+        )
+        self.dry_run_checkbox.grid(row=5, column=0, sticky=tk.W, pady=4)
+        Tooltip(self.dry_run_checkbox, "Validate inputs without writing to Freezerworks.")
 
         self.update_button = ttk.Button(
-            self.main_frame, text="Update", command=self.start_update
+            self.main_frame, text="Update", command=self.start_update, style="Accent.TButton"
         )
-        self.update_button.grid(row=5, column=0, columnspan=2, pady=15, sticky=tk.EW)
+        self.update_button.grid(row=5, column=1, columnspan=2, pady=10, sticky=tk.EW)
+
+        self.progress = ttk.Progressbar(self.main_frame, mode="determinate")
+        self.progress.grid(row=6, column=0, columnspan=3, sticky=tk.EW, pady=4)
+        self.progress.grid_remove()
+
+        self.log_frame = ttk.Frame(self.main_frame)
+        self.log_frame.grid(row=7, column=0, columnspan=3, pady=6, sticky=tk.NSEW)
+        self.log_frame.grid_rowconfigure(0, weight=1)
+        self.log_frame.grid_columnconfigure(0, weight=1)
 
         self.log_text = tk.Text(
-            self.main_frame,
-            height=10,
+            self.log_frame,
+            height=14,
             wrap=tk.WORD,
-            font=("Helvetica", 10),
-            bg="#f5f5f5",
+            font=("Avenir", 10),
+            bg=bg,
+            fg=text,
+            insertbackground=text,
+            highlightbackground=border,
+            highlightcolor=border,
         )
-        self.log_text.grid(row=6, column=0, columnspan=2, pady=10, sticky=tk.NSEW)
+        self.log_text.grid(row=0, column=0, sticky=tk.NSEW)
 
-        self.scrollbar = ttk.Scrollbar(self.main_frame, command=self.log_text.yview)
-        self.scrollbar.grid(row=6, column=2, sticky=tk.NS)
+        self.scrollbar = ttk.Scrollbar(self.log_frame, command=self.log_text.yview)
+        self.scrollbar.grid(row=0, column=1, sticky=tk.NS, padx=(4, 0))
         self.log_text["yscrollcommand"] = self.scrollbar.set
 
         self.log_text.tag_configure("bold", font=("Helvetica", 10, "bold"))
 
+        self.log_button_frame = ttk.Frame(self.main_frame)
+        self.log_button_frame.grid(row=8, column=0, columnspan=3, sticky=tk.W, pady=(0, 0))
+        self.copy_log_button = ttk.Button(
+            self.log_button_frame,
+            text="Copy Log",
+            command=self.copy_log,
+            style="Small.TButton",
+        )
+        self.copy_log_button.pack(side=tk.LEFT)
+        self.clear_log_button = ttk.Button(
+            self.log_button_frame,
+            text="Clear Log",
+            command=self.clear_log,
+            style="Small.TButton",
+        )
+        self.clear_log_button.pack(side=tk.LEFT, padx=(6, 0))
+        self.open_log_button = ttk.Button(
+            self.log_button_frame,
+            text="Open Log File",
+            command=self.open_log_file,
+            style="Small.TButton",
+        )
+        self.open_log_button.pack(side=tk.LEFT, padx=(6, 0))
+
+        self.set_csv_picker_state(False)
+        self.update_action_state()
+
+        self.status_var = tk.StringVar(value="")
+        self.status_label = ttk.Label(
+            root, textvariable=self.status_var, anchor="w", style="Status.TLabel"
+        )
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_label.pack_forget()
+
         # Footer label
         self.footer_label = tk.Label(
             root,
-            text="@Thussenthan Walter-Angelo (Sholler Lab, Penn State College of Medicine); Version 1.6",
+            text="@Thussenthan Walter-Angelo (Sholler Lab, PSCOM); Version 1.7",
             font=("Helvetica", 10),
             bg="#f0f0f0",
             anchor="center",
             fg="#00008B",
             cursor="hand2",
         )
-        self.footer_label.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+        self.footer_label.pack(side=tk.BOTTOM, fill=tk.X, pady=0)
         self.footer_label.bind(
             "<Button-1>",
             lambda e: webbrowser.open_new("https://github.com/thussenthan"),
@@ -169,6 +350,11 @@ class AliquotUpdaterApp:
         self.log_file_path = os.path.join(self._writable_dir(), "freezerworks_processor.log")
         self.updating = False
         self._ellipse_index = 0
+        self.settings_path = os.path.join(self._writable_dir(), "settings.json")
+        self.auto_open_file_picker = True
+        self.load_settings()
+        self._apply_token_placeholder_if_needed()
+        # Getting Started popup removed per user preference
 
     def _resource_dir(self):
         if getattr(sys, "frozen", False):
@@ -190,6 +376,8 @@ class AliquotUpdaterApp:
         self.root.after(0, lambda: func(*args, **kwargs))
 
     def show_error(self, title, message):
+        self.set_status(f"{title}: {message}")
+        self.log(f"{title}: {message}", bold=True)
         self._on_ui(messagebox.showerror, title, message)
 
     def clear_not_updated_aliquots(self):
@@ -197,21 +385,52 @@ class AliquotUpdaterApp:
 
     def get_cert_path(self):
         resource_dir = self._resource_dir()
-        cert_path = os.path.join(resource_dir, "freezerworks.pennstatehealth.net.crt")
-        alt_cert_path = os.path.join(resource_dir, "freezerworks.pennstatehealth.net.cer")
+        cert_names = [
+            "freezerworks.pennstatehealth.net.crt",
+            "freezerworks.pennstatehealth.net.cer",
+        ]
+        search_dirs = [resource_dir, os.getcwd()]
 
-        if os.path.exists(cert_path):
-            return cert_path
-        if os.path.exists(alt_cert_path):
-            return alt_cert_path
+        for directory in search_dirs:
+            for name in cert_names:
+                candidate = os.path.join(directory, name)
+                if os.path.exists(candidate):
+                    try:
+                        with open(candidate, "rb") as cert_file:
+                            data = cert_file.read()
+                        if data.lstrip().startswith(b"-----BEGIN CERTIFICATE-----"):
+                            return candidate
+                        pem_data = ssl.DER_cert_to_PEM_cert(data)
+                        pem_path = os.path.join(
+                            self._writable_dir(),
+                            "freezerworks.pennstatehealth.net.pem",
+                        )
+                        with open(pem_path, "w") as pem_file:
+                            pem_file.write(pem_data)
+                        return pem_path
+                    except Exception as e:
+                        self.show_error(
+                            "Error",
+                            f"Failed to load SSL certificate: {e}",
+                        )
+                        return candidate
 
-        self.show_error("Error", "SSL Certificate not found. Please check the path.")
-        return cert_path
+        searched = "\n".join(f"- {d}" for d in search_dirs)
+        names = ", ".join(cert_names)
+        self.show_error(
+            "Error",
+            "SSL Certificate not found.\n"
+            f"Looked for {names} in:\n{searched}\n"
+            "Place the certificate next to the script/executable or run from that directory.",
+        )
+        return os.path.join(resource_dir, cert_names[0])
 
     def browse_file(self):
         file = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
         if file:
             self.file_path.set(file)
+            self.save_settings()
+            self.update_action_state()
 
     def download_sample_csv(self):
         """Generate and download the default Process Patient Sample CSV template."""
@@ -328,23 +547,46 @@ class AliquotUpdaterApp:
         if platform.system() == "Windows":
             os.startfile(file_path)  # For Windows
         elif platform.system() == "Darwin":
-            os.system(f"open {file_path}")  # For macOS
+            subprocess.run(["open", file_path], check=False)  # For macOS
         else:
-            os.system(f"xdg-open {file_path}")  # For Linux
+            subprocess.run(["xdg-open", file_path], check=False)  # For Linux
 
     def run_in_thread(self, target):
         threading.Thread(target=target).start()
 
     def start_update(self):
         selected_functionality = self.functionality_var.get()
+        token = self._get_token_value()
+        if not token:
+            self._set_token_error(True)
+            self.show_error("Error", "Please enter the Bearer Token.")
+            return
         if not selected_functionality:
             messagebox.showerror("Error", "Please select a functionality to proceed.")
+            return
+        csv_file_path = self.file_path.get()
+        if csv_file_path:
+            self.set_log_file_path(csv_file_path)
+        self.save_settings()
+        self.set_status("Validating CSV...")
+        if not self.validate_csv_schema(selected_functionality, csv_file_path):
+            self.set_status("")
+            return
+        csv_rows = self.read_csv(csv_file_path)
+        if not self.preflight_csv_rows(selected_functionality, csv_rows):
+            self.set_status("")
+            return
+        if self.dry_run_var.get():
+            self.log("Dry run completed. No API calls were made.", bold=True)
+            self.set_status("Dry run complete")
             return
         # begin animation & disable button
         self.updating = True
         self._ellipse_index = 0
         self.update_button.config(state=tk.DISABLED)
+        self._set_progress(mode="indeterminate")
         self.animate_update_text()
+        self.set_status("Running...")
 
         if selected_functionality == "aliquot_assignment":
             self.run_in_thread(self._wrapped_update_aliquots)
@@ -393,18 +635,31 @@ class AliquotUpdaterApp:
     def finish_update(self):
         # call this on the main thread when work is done
         self.updating = False
+        self._set_progress(mode="determinate", maximum=1, value=0)
+        self.progress.grid_remove()
+        self.set_status("Completed")
+        self.root.after(2000, lambda: self.set_status(""))
 
     def validate_inputs(self):
-        token = self.token_entry.get()
+        token = self._get_token_value()
         if not token:
+            self._set_token_error(True)
             self.show_error("Error", "Please enter the Bearer Token.")
+            return None, None
+        token = token.strip()
+        if token.lower().startswith("bearer "):
+            token = token[7:].strip()
+        if not token or any(ch.isspace() for ch in token):
+            self.show_error(
+                "Error",
+                "Bearer Token looks invalid (contains whitespace). Please paste the full token only.",
+            )
             return None, None
 
         csv_file_path = self.file_path.get()
         if not csv_file_path:
             self.show_error("Error", "Please select a CSV file.")
             return None, None
-
         headers = {
             "Content-Type": "application/json",
             "Authorization": "Bearer " + token,
@@ -412,9 +667,7 @@ class AliquotUpdaterApp:
 
         test_url = f"{self.base_url}/freezers/"
         try:
-            test_response = requests.get(
-                test_url, headers=headers, verify=self.cert_path
-            )
+            test_response = self._request("GET", test_url, headers=headers)
             if test_response.status_code != 200:
                 self.log(
                     f"Token validation failed: {test_response.status_code} - {test_response.reason}",
@@ -424,21 +677,356 @@ class AliquotUpdaterApp:
                     "Error",
                     "Invalid Bearer Token. Please check (or re-generate) your token and try again.",
                 )
-                return
+                return None, None
         except requests.exceptions.SSLError as e:
             self.show_error("SSL Error", f"SSL verification failed: {str(e)}")
-            return
+            return None, None
         except requests.exceptions.RequestException as e:
             self.show_error("Network Error", f"Connection failed: {str(e)}")
-            return
+            return None, None
 
         return headers, csv_file_path
 
     def read_csv(self, csv_file_path):
-        with open(csv_file_path, "r") as csvfile:
+        with open(csv_file_path, "r", newline="", encoding="utf-8-sig") as csvfile:
             csv_reader = csv.reader(csvfile)
-            next(csv_reader)
+            try:
+                next(csv_reader)  # skip header
+            except StopIteration:
+                self.show_error("Error", "CSV file is empty.")
+                return []
             return list(csv_reader)
+
+    def set_status(self, message):
+        def _update():
+            if message:
+                if not self.status_label.winfo_ismapped():
+                    self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
+                self.status_var.set(message)
+                self.status_label.configure(style=self._status_style_for_message(message))
+            else:
+                if self.status_label.winfo_ismapped():
+                    self.status_label.pack_forget()
+                self.status_var.set("")
+                self.status_label.configure(style="Status.TLabel")
+
+        self._on_ui(_update)
+
+    def _status_style_for_message(self, message):
+        lowered = message.lower()
+        if any(word in lowered for word in ("error", "failed", "invalid", "ssl", "network")):
+            return "Status.Error.TLabel"
+        if any(word in lowered for word in ("completed", "copied", "cleared", "success", "done")):
+            return "Status.Success.TLabel"
+        return "Status.TLabel"
+
+    def _apply_token_placeholder_if_needed(self):
+        if not self.token_entry.get():
+            self._set_token_placeholder()
+
+    def _set_token_placeholder(self):
+        if self._token_placeholder_active:
+            return
+        self._token_placeholder_active = True
+        self.token_entry.config(
+            show="",
+            foreground=self._muted_color,
+            font=self._token_font_placeholder,
+            style="TEntry",
+        )
+        self.token_entry.delete(0, tk.END)
+        self.token_entry.insert(0, self._token_placeholder_text)
+
+    def _clear_token_placeholder(self):
+        if not self._token_placeholder_active:
+            return
+        self._token_placeholder_active = False
+        self.token_entry.delete(0, tk.END)
+        self.token_entry.config(foreground=self._text_color, font=self._token_font_normal)
+        self.toggle_token_visibility()
+
+    def _on_token_focus_in(self, _event=None):
+        if self._token_placeholder_active:
+            self._clear_token_placeholder()
+
+    def _on_token_focus_out(self, _event=None):
+        if not self.token_entry.get().strip():
+            self._set_token_placeholder()
+
+    def _get_token_value(self):
+        if self._token_placeholder_active:
+            return ""
+        return self.token_entry.get().strip()
+
+    def _set_token_error(self, has_error):
+        style = "Error.TEntry" if has_error else "TEntry"
+        self.token_entry.configure(style=style)
+
+    def toggle_token_visibility(self):
+        if self._token_placeholder_active:
+            self.token_entry.config(show="")
+            return
+        show_char = "" if self.show_token_var.get() else "*"
+        self.token_entry.config(show=show_char)
+        self.update_action_state()
+
+    def set_csv_picker_state(self, enabled):
+        state = "normal" if enabled else "disabled"
+        self.file_path_entry.config(state=state)
+        self.browse_button.config(state=state)
+
+    def on_workflow_change(self):
+        self.set_csv_picker_state(True)
+        self.save_settings()
+        self.update_action_state()
+        if self.auto_open_file_picker and not self.file_path.get().strip():
+            self.root.after(120, self.browse_file)
+
+    def update_action_state(self):
+        has_token = bool(self._get_token_value())
+        has_workflow = bool(self.functionality_var.get())
+        has_csv = bool(self.file_path.get().strip())
+        enabled = has_token and has_workflow and has_csv
+        if has_token:
+            self._set_token_error(False)
+        self.update_button.config(state=tk.NORMAL if enabled and not self.updating else tk.DISABLED)
+
+
+    def _set_progress(self, value=None, maximum=None, mode=None):
+        def _update():
+            if mode:
+                self.progress.config(mode=mode)
+                if mode == "indeterminate":
+                    if not self.progress.winfo_ismapped():
+                        self.progress.grid()
+                    self.progress.start(10)
+                else:
+                    self.progress.stop()
+                    if not self.progress.winfo_ismapped():
+                        self.progress.grid()
+            if maximum is not None:
+                self.progress["maximum"] = maximum
+            if value is not None:
+                self.progress["value"] = value
+
+        self._on_ui(_update)
+
+    def preflight_csv_rows(self, selected_functionality, csv_rows):
+        if not csv_rows:
+            self.show_error("Error", "CSV file has no data rows.")
+            return False
+        required_by_workflow = {
+            "process_sample": [0, 1, 2, 3, 4, 5],
+            "freeze_passaged_cells": [0, 1, 2, 3, 4, 5, 6, 7, 8],
+            "aliquot_assignment": [0, 2, 4, 5],
+        }
+        date_columns = {
+            "process_sample": [4, 5],
+            "freeze_passaged_cells": [4, 6, 8],
+        }
+        required_cols = required_by_workflow.get(selected_functionality, [])
+        date_cols = date_columns.get(selected_functionality, [])
+
+        total_rows = len(csv_rows)
+        self._set_progress(mode="determinate", maximum=total_rows, value=0)
+        for idx, row in enumerate(csv_rows, start=2):
+            self._set_progress(value=idx - 1)
+            if len(row) < max(required_cols, default=0) + 1:
+                self.log(f"Error: Insufficient columns in row {idx}: {row}", bold=True)
+                self.show_error("CSV Format Error", f"Row {idx} is missing columns.")
+                return False
+            for col_index in required_cols:
+                if not row[col_index].strip():
+                    self.log(f"Error: Missing required value in row {idx}.", bold=True)
+                    self.show_error(
+                        "CSV Format Error",
+                        f"Row {idx} is missing required data. Please fix the CSV.",
+                    )
+                    return False
+            for col_index in date_cols:
+                value = row[col_index].strip()
+                if value:
+                    try:
+                        datetime.strptime(value, "%m/%d/%Y")
+                    except ValueError:
+                        self.log(
+                            f"Error: Invalid date format in row {idx}: {value}",
+                            bold=True,
+                        )
+                        self.show_error(
+                            "CSV Format Error",
+                            f"Row {idx} has an invalid date: {value}. Use MM/DD/YYYY.",
+                        )
+                        return False
+        return True
+
+    def save_settings(self):
+        try:
+            settings = {
+                "csv_file_path": self.file_path.get(),
+                "workflow": self.functionality_var.get(),
+                "dry_run": bool(self.dry_run_var.get()),
+            }
+            with open(self.settings_path, "w") as settings_file:
+                json.dump(settings, settings_file)
+        except Exception:
+            pass
+
+    def load_settings(self):
+        try:
+            with open(self.settings_path, "r") as settings_file:
+                settings = json.load(settings_file)
+            if settings.get("csv_file_path"):
+                self.file_path.set(settings["csv_file_path"])
+            if settings.get("workflow"):
+                self.functionality_var.set(settings["workflow"])
+                self.set_csv_picker_state(True)
+            if "dry_run" in settings:
+                self.dry_run_var.set(bool(settings["dry_run"]))
+            self.update_action_state()
+        except Exception:
+            pass
+
+    def _request(self, method, url, headers=None, **kwargs):
+        retries = 3
+        backoff = 0.5
+        for attempt in range(1, retries + 1):
+            try:
+                response = requests.request(
+                    method,
+                    url,
+                    headers=headers,
+                    verify=self.cert_path,
+                    timeout=30,
+                    **kwargs,
+                )
+                if response.status_code in [500, 502, 503, 504] and attempt < retries:
+                    self.log(
+                        f"Warning: {response.status_code} from {url}. Retrying...",
+                        bold=True,
+                    )
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+                return response
+            except requests.exceptions.RequestException as e:
+                if attempt >= retries:
+                    raise
+                self.log(f"Warning: network error {e}. Retrying...", bold=True)
+                time.sleep(backoff)
+                backoff *= 2
+
+    def _print_labels(self, label_id, aliquot_ids, headers, master_id, aliquot_type=None):
+        label_url = f"{self.base_url}/labels/{label_id}/print"
+        label_payload = {
+            "aliquots": aliquot_ids,
+            "numberOfLabelsPerAliquot": 1,
+        }
+        try:
+            response = self._request(
+                "POST",
+                label_url,
+                headers=headers,
+                json=label_payload,
+            )
+            response.raise_for_status()
+            if aliquot_type:
+                self.log(f"Labels made for SL0 Number {master_id}, {aliquot_type}")
+            else:
+                self.log(f"Labels made for SL0 Number {master_id}")
+            return response.content
+        except requests.exceptions.RequestException as e:
+            self.log(
+                f"Error during label printing for SL0 Number {master_id}: {e}",
+                bold=True,
+            )
+            self.not_updated_aliquots.append(master_id)
+            return None
+
+    def validate_csv_schema(self, selected_functionality, csv_file_path):
+        if not csv_file_path:
+            self.show_error("Error", "Please select a CSV file.")
+            return False
+
+        expected_headers = {
+            "process_sample": [
+                "Sample Collection Site",
+                "Sample Study ID",
+                "SL0 Number",
+                "Aliquot Type",
+                "Date of Collection",
+                "Freezing Date",
+                "(Study Time Point)",
+                "(Notes)",
+                "(Number of PK Aliquots)",
+                "(PK Time Point)",
+            ],
+            "freeze_passaged_cells": [
+                "SL0 Number",
+                "Cell Line Name",
+                "Sample Study ID",
+                "Aliquot Type",
+                "Date of Collection",
+                "Sample Collection Site",
+                "Date of Culture Initiation",
+                "Passage Number",
+                "Freezing Date",
+                "(Media)",
+                "(Serum Supplement)",
+                "(Notes)",
+            ],
+            "aliquot_assignment": [
+                "Aliquot ID",
+                "(Shelf)",
+                "Rack",
+                "(Row)",
+                "Box",
+                "Position",
+            ],
+        }
+
+        expected = expected_headers.get(selected_functionality)
+        if not expected:
+            self.show_error("Error", "Unknown workflow selected.")
+            return False
+
+        try:
+            with open(csv_file_path, "r", newline="", encoding="utf-8-sig") as csvfile:
+                csv_reader = csv.reader(csvfile)
+                header = next(csv_reader, None)
+        except OSError as e:
+            self.show_error("Error", f"Failed to read CSV file: {e}")
+            return False
+
+        if not header:
+            self.show_error("Error", "CSV file is empty.")
+            return False
+
+        def normalize(value):
+            return " ".join(value.strip().split()).lower()
+
+        header_norm = [normalize(h) for h in header]
+        expected_norm = [normalize(h) for h in expected]
+
+        missing = [expected[i] for i, v in enumerate(expected_norm) if v not in header_norm]
+        extra = [header[i] for i, v in enumerate(header_norm) if v not in expected_norm]
+
+        if header_norm != expected_norm:
+            parts = []
+            if missing:
+                parts.append("Missing columns: " + ", ".join(missing))
+            if extra:
+                parts.append("Unexpected columns: " + ", ".join(extra))
+            if not missing and not extra:
+                parts.append("Column order does not match the template.")
+            parts.append("Re-download the CSV template and try again.")
+            self.log("CSV header validation failed.", bold=True)
+            self.log("Header found: " + ", ".join(header), bold=True)
+            self.log("Header expected: " + ", ".join(expected), bold=True)
+            self.show_error("CSV Format Error", "\n".join(parts))
+            return False
+
+        return True
 
     def convert_date_format(self, date_str, Master_ID):
         try:
@@ -450,46 +1038,40 @@ class AliquotUpdaterApp:
             )
             return None
 
-    def get_hospital_name(self, hospital_id, Master_ID):
-        headers, _ = self.validate_inputs()
-        if headers is not None:
-            try:
-                normalized_id = int(hospital_id)
-            except ValueError:
-                self.log(
-                    f"Error: Invalid hospital ID for SL0 Number {Master_ID}", bold=True
-                )
-                return None
-            hospital_url = f"{self.base_url}/fields/10182"
-            try:
-                response = requests.get(
-                    hospital_url,
-                    headers=headers,
-                    verify=self.cert_path,
-                )
-                response.raise_for_status()
-                data = response.json()
-                # Extract allowable entries
-                allowable_entries = data["properties"]["allowableEntries"]
-                # Initialize the lookup table
-                lookup_table = {}
-                # Process each entry to split the prefix and the description
-                for entry in allowable_entries:
-                    # Split at the first space
-                    parts = entry.split(" ", 1)
-                    if len(parts) == 2:
-                        key, value = parts
-                        # Remove leading zeros from the numeric key and add to the lookup table
-                        lookup_table[int(key)] = entry
-                hospital_name = lookup_table.get(normalized_id)
-            except requests.exceptions.RequestException as e:
-                return None
-            return hospital_name
+    def get_hospital_name(self, hospital_id, Master_ID, headers):
+        try:
+            normalized_id = int(hospital_id)
+        except ValueError:
+            self.log(
+                f"Error: Invalid hospital ID for SL0 Number {Master_ID}", bold=True
+            )
+            return None
+        hospital_url = f"{self.base_url}/fields/10182"
+        try:
+            response = self._request("GET", hospital_url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            # Extract allowable entries
+            allowable_entries = data["properties"]["allowableEntries"]
+            # Initialize the lookup table
+            lookup_table = {}
+            # Process each entry to split the prefix and the description
+            for entry in allowable_entries:
+                # Split at the first space
+                parts = entry.split(" ", 1)
+                if len(parts) == 2:
+                    key, value = parts
+                    # Remove leading zeros from the numeric key and add to the lookup table
+                    lookup_table[int(key)] = entry
+            hospital_name = lookup_table.get(normalized_id)
+        except requests.exceptions.RequestException:
+            return None
+        return hospital_name
 
     # Get allowable entries for timepoint
     def allowable_timepoint_entries(self, headers):
         url = f"{self.base_url}/fields/10191"
-        response = requests.get(url, headers=headers, verify=self.cert_path)
+        response = self._request("GET", url, headers=headers)
         response.raise_for_status()
         data = response.json()
         allowable_entries = data["properties"]["allowableEntries"]
@@ -508,7 +1090,7 @@ class AliquotUpdaterApp:
         aliquot_url = f"{self.base_url}/aliquots/{aliquot_id}"
         allowable_entry = self.get_allowable_entry(Study_TimePoint, headers)
 
-        if allowable_entry == None:
+        if allowable_entry is None:
             aliquot_payload = {
                 "Study_timepoint_other": Study_TimePoint,
                 "pk_time_point": "Other",
@@ -517,11 +1099,11 @@ class AliquotUpdaterApp:
             aliquot_payload = {"pk_time_point": Study_TimePoint}
         time.sleep(0.5)  # Adding a small delay to avoid overwhelming the server
         try:
-            response = requests.post(
+            response = self._request(
+                "POST",
                 aliquot_url,
-                json=aliquot_payload,
                 headers=headers,
-                verify=self.cert_path,
+                json=aliquot_payload,
             )
             response.raise_for_status()
             return
@@ -551,11 +1133,11 @@ class AliquotUpdaterApp:
         }
 
         try:
-            response = requests.post(
+            response = self._request(
+                "POST",
                 f"{self.base_url}/search/",
-                json=payload,
                 headers=headers,
-                verify=self.cert_path,
+                json=payload,
             )
             response.raise_for_status()
             data = response.json()
@@ -616,7 +1198,11 @@ class AliquotUpdaterApp:
         merger = PdfMerger()
         files_added = 0
 
-        for csv_row in csv_rows:
+        total_rows = len(csv_rows)
+        self._set_progress(mode="determinate", maximum=total_rows, value=0)
+        for index, csv_row in enumerate(csv_rows, start=1):
+            self._set_progress(value=index)
+            self.log(f"Processing row {index}/{total_rows}")
             if len(csv_row) < 6:
                 self.not_updated_aliquots.append("Incorrect CSV Formatting")
                 self.log(f"Error: Insufficient columns in row: {csv_row}", bold=True)
@@ -689,7 +1275,9 @@ class AliquotUpdaterApp:
             return
 
         # Get hospital name and check if it's valid
-        Hospital_Name = self.get_hospital_name(Sample_Collection_Site, Master_ID)
+        Hospital_Name = self.get_hospital_name(
+            Sample_Collection_Site, Master_ID, headers
+        )
         if Hospital_Name is None:
             self.log(
                 f"Error: Sample processing aborted due to invalid hospital name for SL0 Number {Master_ID}.",
@@ -708,56 +1296,6 @@ class AliquotUpdaterApp:
             )
             self.not_updated_aliquots.append(Master_ID)
             return
-
-        def print_labels(self, Master_ID, labels_to_print_ids, headers):
-            # Printing labels
-            label_url = f"{self.base_url}/labels/9/print"
-            label_payload = {
-                "aliquots": labels_to_print_ids,
-                "numberOfLabelsPerAliquot": 1,
-            }
-            try:
-                response = requests.post(
-                    label_url,
-                    json=label_payload,
-                    headers=headers,
-                    verify=self.cert_path,
-                )
-                response.raise_for_status()
-                self.log(f"Labels made for SL0 Number {Master_ID}, {Aliquot_Type}")
-                return response.content
-            except requests.exceptions.RequestException as e:
-                self.log(
-                    f"Error during label printing for SL0 Number {Master_ID}: {e}",
-                    bold=True,
-                )
-                self.not_updated_aliquots.append(Master_ID)
-                return
-
-        def print_cell_line_labels(self, Master_ID, labels_to_print_ids, headers):
-            # Printing labels for cell line cultures
-            culture_label_url = f"{self.base_url}/labels/3/print"
-            culture_label_payload = {
-                "aliquots": labels_to_print_ids,
-                "numberOfLabelsPerAliquot": 1,
-            }
-            try:
-                response = requests.post(
-                    culture_label_url,
-                    json=culture_label_payload,
-                    headers=headers,
-                    verify=self.cert_path,
-                )
-                response.raise_for_status()
-                self.log(f"Labels made for SL0 Number {Master_ID}, {Aliquot_Type}")
-                return response.content
-            except requests.exceptions.RequestException as e:
-                self.log(
-                    f"Error during label printing for SL0 Number {Master_ID}: {e}",
-                    bold=True,
-                )
-                self.not_updated_aliquots.append(Master_ID)
-                return
 
         # Initialize list to store aliquot IDs for label printing
         labels_to_print_ids = []
@@ -794,11 +1332,11 @@ class AliquotUpdaterApp:
 
             # Make aliquot creation requests
             try:
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url,
-                    json=aliquot_payload,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -817,38 +1355,17 @@ class AliquotUpdaterApp:
                     self.studyTimepoint(Master_ID, aliquot_id, Study_TimePoint, headers)
 
             # Printing labels
-            if "BCC18" in Sample_Study_ID and Aliquot_Type == "ADA Serum":
-                label_url = f"{self.base_url}/labels/17/print"
-            else:
-                label_url = f"{self.base_url}/labels/4/print"
-            label_payload = {
-                "aliquots": labels_to_print_ids,
-                "numberOfLabelsPerAliquot": 1,
-            }
-            try:
-                response = requests.post(
-                    label_url,
-                    json=label_payload,
-                    headers=headers,
-                    verify=self.cert_path,
-                )
-                response.raise_for_status()
-                self.log(f"Labels made for SL0 Number {Master_ID}, {Aliquot_Type}")
-                return response.content
-            except requests.exceptions.RequestException as e:
-                self.log(
-                    f"Error during label printing for SL0 Number {Master_ID}: {e}",
-                )
-                return
+            label_id = 17 if "BCC18" in Sample_Study_ID and Aliquot_Type == "ADA Serum" else 4
+            return self._print_labels(label_id, labels_to_print_ids, headers, Master_ID, Aliquot_Type)
         elif Aliquot_Type == "BMA":
             aliquot_payload.update({"Aliquot_Type": "Bone Marrow Aspirate"})
 
             try:
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url,
-                    json=aliquot_payload,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -870,11 +1387,11 @@ class AliquotUpdaterApp:
             )
 
             try:
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url,
-                    json=aliquot_payload,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -889,11 +1406,11 @@ class AliquotUpdaterApp:
                     "Subaliquot_Type": "Cultured",
                 }
                 time.sleep(0.5)
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url_BMA,
-                    json=aliquot_payload_BMA,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload_BMA,
                 )
                 response.raise_for_status()
             except requests.exceptions.RequestException as e:
@@ -910,8 +1427,7 @@ class AliquotUpdaterApp:
                 for aliquot_id in labels_to_print_ids:
                     self.studyTimepoint(Master_ID, aliquot_id, Study_TimePoint, headers)
 
-            content = print_labels(self, Master_ID, labels_to_print_ids, headers)
-            return content
+            return self._print_labels(9, labels_to_print_ids, headers, Master_ID, Aliquot_Type)
 
         elif Aliquot_Type in ["BC", "Tumor"]:
             if Aliquot_Type == "BC":
@@ -925,11 +1441,11 @@ class AliquotUpdaterApp:
             )
 
             try:
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url,
-                    json=aliquot_payload,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -943,11 +1459,11 @@ class AliquotUpdaterApp:
                 aliquot_payload_alt = {
                     "Cell_Line_Name_": f"SL0{Master_ID}-{PK_ParentAliquotID}"
                 }
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url_alt,
-                    json=aliquot_payload_alt,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload_alt,
                 )
                 response.raise_for_status()
             except requests.exceptions.RequestException as e:
@@ -964,10 +1480,7 @@ class AliquotUpdaterApp:
                 for aliquot_id in labels_to_print_ids:
                     self.studyTimepoint(Master_ID, aliquot_id, Study_TimePoint, headers)
 
-            content = print_cell_line_labels(
-                self, Master_ID, labels_to_print_ids, headers
-            )
-            return content
+            return self._print_labels(3, labels_to_print_ids, headers, Master_ID, Aliquot_Type)
 
         else:
             if Aliquot_Type == "BM":
@@ -984,11 +1497,11 @@ class AliquotUpdaterApp:
 
             # Make aliquot creation requests
             try:
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url,
-                    json=aliquot_payload,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -1024,11 +1537,11 @@ class AliquotUpdaterApp:
             # Loop through for repeats
             for _ in range(repeats):
                 try:
-                    response = requests.post(
+                    response = self._request(
+                        "POST",
                         aliquot_url,
-                        json=aliquot_payload,
                         headers=headers,
-                        verify=self.cert_path,
+                        json=aliquot_payload,
                     )
                     response.raise_for_status()
                     data = response.json()
@@ -1062,11 +1575,11 @@ class AliquotUpdaterApp:
 
             for _ in range(2):
                 try:
-                    response = requests.post(
+                    response = self._request(
+                        "POST",
                         aliquot_url,
-                        json=aliquot_payload,
                         headers=headers,
-                        verify=self.cert_path,
+                        json=aliquot_payload,
                     )
                     response.raise_for_status()
                     data = response.json()
@@ -1085,8 +1598,7 @@ class AliquotUpdaterApp:
                 for aliquot_id in labels_to_print_ids:
                     self.studyTimepoint(Master_ID, aliquot_id, Study_TimePoint, headers)
 
-            content = print_labels(self, Master_ID, labels_to_print_ids, headers)
-            return content
+            return self._print_labels(9, labels_to_print_ids, headers, Master_ID, Aliquot_Type)
 
     def passage_culture_cells(self):
         headers, csv_file_path = self.validate_inputs()
@@ -1100,7 +1612,11 @@ class AliquotUpdaterApp:
         merger = PdfMerger()
         files_added = 0
 
-        for csv_row in csv_rows:
+        total_rows = len(csv_rows)
+        self._set_progress(mode="determinate", maximum=total_rows, value=0)
+        for index, csv_row in enumerate(csv_rows, start=1):
+            self._set_progress(value=index)
+            self.log(f"Processing row {index}/{total_rows}")
             if len(csv_row) < 11:
                 self.not_updated_aliquots.append("Incorrect CSV Formatting")
                 self.log(f"Error: Insufficient columns in row: {csv_row}", bold=True)
@@ -1177,7 +1693,9 @@ class AliquotUpdaterApp:
             self.not_updated_aliquots.append(Master_ID)
             return
         # Get hospital name and check if it's valid
-        Hospital_Name = self.get_hospital_name(Sample_Collection_Site, Master_ID)
+        Hospital_Name = self.get_hospital_name(
+            Sample_Collection_Site, Master_ID, headers
+        )
         if Hospital_Name is None:
             self.log(
                 f"Error: Sample processing aborted due to invalid hospital name for SL0 Number {Master_ID}.",
@@ -1265,11 +1783,11 @@ class AliquotUpdaterApp:
         # Loop through for repeats
         for label_id in labels_ids:
             try:
-                response = requests.post(
+                response = self._request(
+                    "POST",
                     aliquot_url,
-                    json=aliquot_payload,
                     headers=headers,
-                    verify=self.cert_path,
+                    json=aliquot_payload,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -1283,11 +1801,11 @@ class AliquotUpdaterApp:
                     IDEXX_string = "IDEXX " + Notes
                     IDEXX_aliquot_payload = {"Sample_Notes": IDEXX_string}
                     try:
-                        response = requests.post(
+                        response = self._request(
+                            "POST",
                             f"{self.base_url}/aliquots/{pk_aliquot_uid}",
-                            json=IDEXX_aliquot_payload,
                             headers=headers,
-                            verify=self.cert_path,
+                            json=IDEXX_aliquot_payload,
                         )
                     except requests.exceptions.RequestException as e:
                         self.log(
@@ -1307,47 +1825,21 @@ class AliquotUpdaterApp:
         if Passage_Number == 3:
             pdf_merger = PdfMerger()
 
-            frozen_culture_label_url = f"{self.base_url}/labels/3/print"
-            frozen_culture_label_payload = {
-                "aliquots": frozen_culture_labels_to_print_ids,
-                "numberOfLabelsPerAliquot": 1,
-            }
-            try:
-                response = requests.post(
-                    frozen_culture_label_url,
-                    json=frozen_culture_label_payload,
-                    headers=headers,
-                    verify=self.cert_path,
-                )
-                response.raise_for_status()
-                frozen_culture_pdf = BytesIO(response.content)
-                pdf_merger.append(frozen_culture_pdf)
-            except requests.exceptions.RequestException as e:
-                self.log(
-                    f"Error during label making for SL0 Number {Master_ID}: {e}",
-                )
+            frozen_content = self._print_labels(
+                3, frozen_culture_labels_to_print_ids, headers, Master_ID
+            )
+            if not frozen_content:
                 return
+            frozen_culture_pdf = BytesIO(frozen_content)
+            pdf_merger.append(frozen_culture_pdf)
 
-            IDEXX_label_url = f"{self.base_url}/labels/7/print"
-            IDEXX_label_payload = {
-                "aliquots": IDEXX_labels_to_print_ids,
-                "numberOfLabelsPerAliquot": 1,
-            }
-            try:
-                response = requests.post(
-                    IDEXX_label_url,
-                    json=IDEXX_label_payload,
-                    headers=headers,
-                    verify=self.cert_path,
-                )
-                response.raise_for_status()
-                IDEXX_pdf = BytesIO(response.content)
-                pdf_merger.append(IDEXX_pdf)
-            except requests.exceptions.RequestException as e:
-                self.log(
-                    f"Error during label making for SL0 Number {Master_ID}: {e}",
-                )
+            idexx_content = self._print_labels(
+                7, IDEXX_labels_to_print_ids, headers, Master_ID
+            )
+            if not idexx_content:
                 return
+            IDEXX_pdf = BytesIO(idexx_content)
+            pdf_merger.append(IDEXX_pdf)
 
             merged_label_pdf = BytesIO()
             pdf_merger.write(merged_label_pdf)
@@ -1357,25 +1849,9 @@ class AliquotUpdaterApp:
             return merged_label_pdf.getvalue()
 
         else:
-            frozen_culture_label_url = f"{self.base_url}/labels/3/print"
-            frozen_culture_label_payload = {
-                "aliquots": frozen_culture_labels_to_print_ids,
-                "numberOfLabelsPerAliquot": 1,
-            }
-            try:
-                response = requests.post(
-                    frozen_culture_label_url,
-                    json=frozen_culture_label_payload,
-                    headers=headers,
-                    verify=self.cert_path,
-                )
-                response.raise_for_status()
-                self.log(f"Labels made for SL0 Number {Master_ID}")
-            except requests.exceptions.RequestException as e:
-                self.log(
-                    f"Error during label making for SL0 Number {Master_ID}: {e}",
-                )
-            return response.content
+            return self._print_labels(
+                3, frozen_culture_labels_to_print_ids, headers, Master_ID
+            )
 
     def update_aliquots(self):
         headers, csv_file_path = self.validate_inputs()
@@ -1386,7 +1862,11 @@ class AliquotUpdaterApp:
 
         csv_rows = self.read_csv(csv_file_path)
 
-        for csv_row in csv_rows:
+        total_rows = len(csv_rows)
+        self._set_progress(mode="determinate", maximum=total_rows, value=0)
+        for index, csv_row in enumerate(csv_rows, start=1):
+            self._set_progress(value=index)
+            self.log(f"Processing row {index}/{total_rows}")
             if len(csv_row) < 4:
                 self.not_updated_aliquots.append("Incorrect CSV Formatting")
                 self.log(f"Error: Insufficient columns in row: {csv_row}", bold=True)
@@ -1412,7 +1892,7 @@ class AliquotUpdaterApp:
         url = f"{self.base_url}/aliquots/{aliquot_id}"
 
         try:
-            output_str = requests.get(url, headers=headers, verify=self.cert_path)
+            output_str = self._request("GET", url, headers=headers)
             output_str.raise_for_status()
             try:
                 output = output_str.json()
@@ -1432,7 +1912,7 @@ class AliquotUpdaterApp:
                 ):
                     payload = {
                         "fwLocation": {
-                            "FK_FreezerSectID": 10016,
+                            "FK_FreezerSectID": 10019,
                             "position1": rack,
                             "position2": box,
                             "position3": position,
@@ -1456,8 +1936,8 @@ class AliquotUpdaterApp:
                         bold=True,
                     )
                     return
-                response = requests.post(
-                    url, json=payload, headers=headers, verify=self.cert_path
+                response = self._request(
+                    "POST", url, headers=headers, json=payload
                 )
 
                 # Handle response status code
@@ -1480,8 +1960,11 @@ class AliquotUpdaterApp:
             self.not_updated_aliquots.append(aliquot_id)
 
     def log(self, message, bold=False):
+        self.append_log_file(message)
         tag = "bold" if bold else None
-        self._on_ui(self._append_log, message, tag)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        ui_message = f"[{timestamp}] {message}"
+        self._on_ui(self._append_log, ui_message, tag)
 
     def _append_log(self, message, tag):
         self.log_text.insert(tk.END, message + "\n", tag)
@@ -1494,6 +1977,44 @@ class AliquotUpdaterApp:
                     f"\n[{datetime.now().isoformat()}] {context}: {repr(exc)}\n"
                 )
                 log_file.write(traceback.format_exc())
+        except Exception:
+            # Avoid crashing on logging failures.
+            pass
+
+    def open_log_file(self):
+        self.open_file(self.log_file_path)
+
+    def copy_log(self):
+        try:
+            content = self.log_text.get("1.0", tk.END).strip()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(content)
+            self.set_status("Log copied to clipboard")
+        except Exception:
+            self.set_status("Failed to copy log")
+
+    def clear_log(self):
+        try:
+            self.log_text.delete("1.0", tk.END)
+            with open(self.log_file_path, "w") as log_file:
+                log_file.write("")
+            self.set_status("Log cleared")
+        except Exception:
+            self.set_status("Failed to clear log")
+
+    def set_log_file_path(self, csv_file_path):
+        try:
+            csv_dir = os.path.dirname(os.path.abspath(csv_file_path))
+            self.log_file_path = os.path.join(csv_dir, "freezerworks_processor.log")
+        except Exception:
+            self.log_file_path = os.path.join(
+                self._writable_dir(), "freezerworks_processor.log"
+            )
+
+    def append_log_file(self, message):
+        try:
+            with open(self.log_file_path, "a") as log_file:
+                log_file.write(f"[{datetime.now().isoformat()}] {message}\n")
         except Exception:
             # Avoid crashing on logging failures.
             pass
